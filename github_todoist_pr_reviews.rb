@@ -6,6 +6,7 @@ require 'json'
 require 'uri'
 require 'fileutils'
 require 'date'
+require 'set'
 
 # GitHub-Todoist PR Reviews Sync
 # Monitors your own PRs for new reviews and creates follow-up tasks
@@ -115,8 +116,11 @@ class GithubTodoistPrReviews
 
     # Check if this is a new review or if we don't have a task yet
     if @state['pr_reviews'][pr_url]['last_review_id'] != latest_review['id']
-      # Create or update task for this PR
-      task_id = create_or_update_review_task(pr, latest_review)
+      # Complete old task if it exists and create new task for this review
+      complete_task_for_pr(pr_url, "New review received") if @state['pr_reviews'][pr_url]['task_id']
+
+      # Create task for this PR
+      task_id = create_review_task(pr, latest_review)
       if task_id
         @state['pr_reviews'][pr_url]['task_id'] = task_id
         @state['pr_reviews'][pr_url]['last_review_id'] = latest_review['id']

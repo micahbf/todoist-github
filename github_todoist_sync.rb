@@ -6,6 +6,7 @@ require 'json'
 require 'uri'
 require 'fileutils'
 require 'date'
+require 'set'
 
 # GitHub-Todoist PR Review Sync
 # Syncs GitHub pull request review requests to Todoist tasks
