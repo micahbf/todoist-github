@@ -1,15 +1,34 @@
-# GitHub-Todoist PR Review Sync
+# GitHub-Todoist Integrations
 
-A Ruby script that automatically syncs GitHub pull request review requests to Todoist tasks. When you're requested to review a PR, a task is created in Todoist. When you complete the review (or the request is removed), the task is automatically marked as complete.
+A collection of Ruby scripts that automatically sync GitHub activities to Todoist tasks. No external gem dependencies - uses only Ruby stdlib.
 
-## Features
+## Integrations
 
+### 1. PR Review Requests Sync (`github_todoist_sync.rb`)
+Syncs GitHub pull request review requests to Todoist tasks. When you're requested to review a PR, a task is created in Todoist. When you complete the review (or the request is removed), the task is automatically marked as complete.
+
+**Features:**
 - Automatically creates Todoist tasks for PRs requesting your review
 - Includes PR title, repository, author, and URL in the task
-- Sets tasks as high priority by default
+- Sets tasks with configurable priority
 - Automatically completes tasks when you finish the review
 - Maintains state between runs to track which PRs have tasks
 - Safe to run repeatedly (idempotent)
+
+### 2. PR Reviews Received Sync (`github_todoist_pr_reviews.rb`)
+Monitors your own PRs for new reviews and creates follow-up tasks. When someone reviews your PR, a task is created with details about the latest review.
+
+**Features:**
+- Tracks reviews on all your open PRs
+- Creates **one task per PR** showing the most recent review
+- Updates the task when a new review comes in (completes old, creates new)
+- Includes review type (Approval, Changes Requested, or Comments) in task
+- Sets higher priority for "Changes Requested" reviews
+- Links directly to the PR for quick access
+- **Automatically completes tasks when:**
+  - The PR is merged
+  - You request a new review (indicating you've addressed the feedback)
+  - The PR is closed
 
 ## Prerequisites
 
@@ -88,45 +107,52 @@ TODOIST_SECTION_ID=123456789   # Optional (requires project ID)
 
 ### Manual Run
 
-The script automatically loads environment variables from the `.env` file:
+The scripts automatically load environment variables from the `.env` file:
 
 ```bash
-# Simply run the script (reads .env automatically)
+# PR Review Requests Sync
 ruby github_todoist_sync.rb
+
+# PR Reviews Received Sync
+ruby github_todoist_pr_reviews.rb
 ```
 
 Or pass environment variables directly if preferred:
 
 ```bash
 GITHUB_TOKEN=your_token TODOIST_TOKEN=your_token ruby github_todoist_sync.rb
+GITHUB_TOKEN=your_token TODOIST_TOKEN=your_token ruby github_todoist_pr_reviews.rb
 ```
 
 ### Automated Sync with Cron
 
-To run the sync automatically every 15 minutes:
+To run the syncs automatically every 15 minutes:
 
 1. Open your crontab:
    ```bash
    crontab -e
    ```
 
-2. Add this line (adjust the path to your script location):
+2. Add these lines (adjust the path to your script location):
    ```cron
    */15 * * * * cd /Users/micahbf/code/github-todoist && ruby github_todoist_sync.rb >> ~/github_todoist_sync.log 2>&1
+   */15 * * * * cd /Users/micahbf/code/github-todoist && ruby github_todoist_pr_reviews.rb >> ~/github_todoist_pr_reviews.log 2>&1
    ```
 
-   Note: The script automatically reads the `.env` file, so no need to export variables in cron.
+   Note: The scripts automatically read the `.env` file, so no need to export variables in cron.
 
 3. Save and exit
 
 This will:
 - Run every 15 minutes
 - Load environment variables from `.env`
-- Log output to `~/github_todoist_sync.log`
+- Log output to separate log files
 
 ### Using Launchd (macOS alternative to cron)
 
-Create a plist file at `~/Library/LaunchAgents/com.github.todoist.sync.plist`:
+Create separate plist files for each integration.
+
+For PR Review Requests (`~/Library/LaunchAgents/com.github.todoist.sync.plist`):
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -154,22 +180,53 @@ Create a plist file at `~/Library/LaunchAgents/com.github.todoist.sync.plist`:
 </plist>
 ```
 
-Note: The script will automatically read the `.env` file from the WorkingDirectory, so you don't need to specify environment variables in the plist.
+For PR Reviews Received (`~/Library/LaunchAgents/com.github.todoist.pr_reviews.plist`):
 
-Then load it:
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.github.todoist.pr_reviews</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/ruby</string>
+        <string>/Users/micahbf/code/github-todoist/github_todoist_pr_reviews.rb</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/micahbf/code/github-todoist</string>
+    <key>StartInterval</key>
+    <integer>900</integer>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/tmp/github_todoist_pr_reviews.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/github_todoist_pr_reviews.error.log</string>
+</dict>
+</plist>
+```
+
+Note: The scripts will automatically read the `.env` file from the WorkingDirectory, so you don't need to specify environment variables in the plist.
+
+Then load them:
 
 ```bash
 launchctl load ~/Library/LaunchAgents/com.github.todoist.sync.plist
+launchctl load ~/Library/LaunchAgents/com.github.todoist.pr_reviews.plist
 ```
 
 ## How It Works
+
+### PR Review Requests Sync
 
 1. **Fetches Review Requests**: Uses GitHub's search API with `review-requested:@me` to find all open PRs where you're requested as a reviewer
 
 2. **Creates Tasks**: For each PR requesting review, creates a Todoist task with:
    - Content: "Review PR #123: Fix authentication bug"
    - Description: Repository name, author, and PR URL
-   - Priority: High (3)
+   - Priority: Normal (1)
    - Project: Your specified project or Inbox
    - Section: Your specified section (if configured)
 
@@ -177,15 +234,52 @@ launchctl load ~/Library/LaunchAgents/com.github.todoist.sync.plist
 
 4. **Completes Tasks**: When a PR no longer appears in your review requests (because you reviewed it or the request was removed), the corresponding Todoist task is automatically marked complete
 
+### PR Reviews Received Sync
+
+1. **Fetches Your PRs**: Uses GitHub's search API with `author:@me` to find all open PRs you created
+
+2. **Checks for Reviews**: For each PR, fetches all submitted reviews using the GitHub API
+
+3. **Creates/Updates Follow-up Tasks**: For each PR with reviews, maintains **one task per PR**:
+   - Shows the most recent review
+   - When a new review comes in, completes the old task and creates a new one
+   - Content: "Follow up on [Review Type] from @reviewer - PR #123"
+   - Description: PR title, repository, review type, reviewer, and PR URL
+   - Priority: High (3) for "Changes Requested", Medium (2) for others
+   - Project: Your specified project or Inbox
+   - Section: Your specified section (if configured)
+
+4. **Tracks State**: Maintains a mapping of PR URLs to task IDs and last review IDs in `~/.github_todoist_pr_reviews_state.json`
+
+5. **Completes Tasks Automatically**:
+   - When PR is merged, completes the review follow-up task
+   - When new review is requested (checked via `requested_reviewers` field), completes the existing task
+   - When PR is closed, completes task and removes from tracking
+   - When a new review comes in, completes the old task before creating the updated one
+
+6. **Cleans Up**: Removes closed/merged PRs from tracking state
+
 ## Task Format
 
-Tasks are created with this format:
+### Review Request Tasks
 
 ```
 Review PR #123: Fix authentication bug
 
 Repository: owner/repo-name
 Author: @username
+URL: https://github.com/owner/repo-name/pull/123
+```
+
+### Review Received Tasks
+
+```
+Follow up on Changes Requested from @reviewer - PR #123
+
+PR: Fix authentication bug
+Repository: owner/repo-name
+Review Type: Changes Requested
+Reviewer: @reviewer
 URL: https://github.com/owner/repo-name/pull/123
 ```
 
@@ -214,7 +308,11 @@ Your Todoist token is invalid. Get a new one from the Todoist integrations page.
 
 ### State file location
 
-The state file is stored at `~/.github_todoist_sync_state.json`. You can delete this file to reset the state, but existing tasks won't be automatically cleaned up.
+State files are stored in your home directory:
+- `~/.github_todoist_sync_state.json` - PR review requests tracking
+- `~/.github_todoist_pr_reviews_state.json` - PR reviews received tracking
+
+You can delete these files to reset the state, but existing tasks won't be automatically cleaned up.
 
 ## Security Notes
 
@@ -272,12 +370,19 @@ To use these IDs, add them to your .env file:
 
 ## Customization
 
-You can modify the script to:
+### PR Review Requests Sync (`github_todoist_sync.rb`)
 
-- Change task priority (line 97): `priority: 3` (1=normal, 2=medium, 3=high, 4=urgent)
-- Customize task content format (lines 89-90)
+- Change task priority (line 156): `priority: 1` (1=normal, 2=medium, 3=high, 4=urgent)
+- Customize task content format (lines 149-150)
 - Add labels to tasks by modifying the `body` hash in `create_todoist_task`
-- Filter PRs by repository or other criteria in `fetch_github_review_requests`
+- Filter PRs by repository or other criteria in `fetch_github_review_requests_search_only`
+
+### PR Reviews Received Sync (`github_todoist_pr_reviews.rb`)
+
+- Change task priority (line 206): `priority: review_state == 'CHANGES_REQUESTED' ? 3 : 2`
+- Customize task content format (line 190)
+- Add labels to tasks by modifying the `body` hash in `create_or_update_review_task`
+- Filter which review types trigger tasks by modifying the review processing logic
 
 ## License
 

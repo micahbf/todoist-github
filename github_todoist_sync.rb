@@ -147,13 +147,13 @@ class GithubTodoistSync
     author = pr['user']['login']
 
     task_content = "Review PR ##{pr_number}: #{pr_title}"
-    task_description = "Repository: #{repo_name}\nAuthor: @#{author}\nURL: #{pr_url}"
+    task_description = "#{pr_url}\nRepository: #{repo_name}\nAuthor: @#{author}"
 
     uri = URI("#{TODOIST_API_BASE}/tasks")
     body = {
       content: task_content,
       description: task_description,
-      priority: 1,
+      priority: 4,
       due_date: Date.today.to_s # Set due date to today (YYYY-MM-DD format)
     }
     body[:project_id] = @todoist_project_id if @todoist_project_id

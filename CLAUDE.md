@@ -8,6 +8,7 @@ A collection of Ruby-based GitHub-Todoist integrations. Each integration is a st
 
 **Current Integrations:**
 - `github_todoist_sync.rb` - Syncs PR review requests to Todoist tasks (auto-completes when review is done)
+- `github_todoist_pr_reviews.rb` - Monitors your PRs for new reviews and creates follow-up tasks with review type (auto-completes when PR is merged or review is re-requested)
 
 **Shared Utilities:**
 - `list_todoist_info.rb` - Discovers Todoist project/section IDs for configuration
@@ -17,8 +18,11 @@ A collection of Ruby-based GitHub-Todoist integrations. Each integration is a st
 All scripts automatically read `.env` file - no manual export needed.
 
 ```bash
-# PR Review Sync
+# PR Review Requests Sync
 ruby github_todoist_sync.rb
+
+# PR Reviews Received Sync
+ruby github_todoist_pr_reviews.rb
 
 # Utility: List Todoist projects and sections
 ruby list_todoist_info.rb
@@ -59,7 +63,7 @@ Integrations that need to track GitHub entities → Todoist tasks should:
 - Load state at init, persist after each sync
 - Enable idempotent operation and automatic task lifecycle management
 
-**Example (PR Review Sync):**
+**Example (PR Review Requests Sync):**
 ```json
 {
   "pr_to_task": {
@@ -67,6 +71,20 @@ Integrations that need to track GitHub entities → Todoist tasks should:
   }
 }
 ```
+
+**Example (PR Reviews Received Sync):**
+```json
+{
+  "pr_reviews": {
+    "https://github.com/owner/repo/pull/123": {
+      "task_id": "todoist_task_id_string",
+      "last_review_id": 123456790
+    }
+  }
+}
+```
+
+This structure maintains **one task per PR**, tracking the latest review to determine when to update the task.
 
 ### Sync Flow Pattern
 
@@ -76,6 +94,15 @@ Standard pattern for bidirectional sync integrations:
 3. **Complete** - For items in state but no longer active, close Todoist task and remove mapping
 4. **Persist** - Save state JSON after each sync
 
+**PR Reviews Sync Enhancement:**
+The PR reviews integration extends this pattern with additional logic:
+- Maintains **one task per PR** showing the most recent review
+- Checks PR merge status via `pr_details['merged']`
+- Checks for new review requests via `pr_details['requested_reviewers']`
+- When a new review comes in, completes the old task and creates a new one
+- Completes task when PR is merged, closed, or review is re-requested
+- Tracks `last_review_id` to detect when a new review arrives
+
 ### API Integration
 
 **GitHub API (base: `https://api.github.com`):**
@@ -83,6 +110,8 @@ Standard pattern for bidirectional sync integrations:
 - Standard headers: `Authorization: Bearer <token>`, `Accept: application/vnd.github+json`, `X-GitHub-Api-Version: 2022-11-28`, `User-Agent: GitHub-Todoist-Sync`
 - Common search qualifiers: `type:pr`, `type:issue`, `state:open`, `review-requested:@me`, `assignee:@me`, `author:@me`
 - Returns objects with `html_url` (use as unique identifier), `title`, `number`, `user`, `repository_url`
+- PR details endpoint: `GET /repos/{owner}/{repo}/pulls/{number}` - Returns full PR object including `merged` status, `requested_reviewers`, `requested_teams`
+- PR reviews endpoint: `GET /repos/{owner}/{repo}/pulls/{number}/reviews` - Returns array of review objects with `id`, `user`, `state` (APPROVED, CHANGES_REQUESTED, COMMENTED)
 
 **Todoist API v2 (base: `https://api.todoist.com/rest/v2`):**
 - REST endpoints, JSON payloads
@@ -104,22 +133,64 @@ When creating a new GitHub-Todoist integration:
 6. **Add to README:** Document the new integration with usage examples
 7. **Update .env.example:** Add any integration-specific variables
 
-## PR Review Sync Customization
+## Integration-Specific Customization
 
-**Task Priority** (line 97):
+### PR Review Requests Sync (`github_todoist_sync.rb`)
+
+**Task Priority** (line 156):
 ```ruby
-priority: 3  # 1=normal, 2=medium, 3=high, 4=urgent
+priority: 1  # 1=normal, 2=medium, 3=high, 4=urgent
 ```
 
-**Task Format** (lines 90-91):
+**Task Format** (lines 149-150):
 ```ruby
 task_content = "Review PR ##{pr_number}: #{pr_title}"
 task_description = "Repository: #{repo_name}\nAuthor: @#{author}\nURL: #{pr_url}"
 ```
 
-**Filtering:** Modify search query in `fetch_github_review_requests` (line 65) to filter by repo/org
+**Filtering:** Modify search query in `fetch_github_review_requests_search_only` to filter by repo/org
 
 **Labels:** Add `labels: ['label-name']` to task body hash in `create_todoist_task`
+
+### PR Reviews Received Sync (`github_todoist_pr_reviews.rb`)
+
+**Task Priority** (line 206):
+```ruby
+priority: review_state == 'CHANGES_REQUESTED' ? 3 : 2  # Dynamic based on review type
+```
+
+**Task Format** (line 190):
+```ruby
+task_content = "Follow up on #{review_type} from @#{reviewer} - PR ##{pr_number}"
+```
+
+**One Task Per PR** (lines 114-125):
+```ruby
+# Get the most recent review (reviews are returned chronologically)
+latest_review = reviews.last
+
+# Check if this is a new review or if we don't have a task yet
+if @state['pr_reviews'][pr_url]['last_review_id'] != latest_review['id']
+  # Create or update task for this PR (completes old task if exists)
+  task_id = create_or_update_review_task(pr, latest_review)
+end
+```
+
+**Completion Triggers** (lines 90-103):
+```ruby
+# Modify conditions for automatic task completion
+if pr_details['merged']
+  complete_task_for_pr(pr_url, "PR was merged")
+end
+
+if !requested_reviewers.empty? || !requested_teams.empty?
+  complete_task_for_pr(pr_url, "New review was requested")
+end
+```
+
+**Filtering:** Modify review type handling in `create_or_update_review_task` to filter which reviews trigger tasks
+
+**Labels:** Add `labels: ['label-name']` to task body hash in `create_or_update_review_task`
 
 ## State File Management
 
@@ -127,10 +198,13 @@ State files live in home directory as `~/.github_todoist_<integration>_state.jso
 
 To reset an integration's state:
 ```bash
-# PR Review Sync
+# PR Review Requests Sync
 rm ~/.github_todoist_sync_state.json
 
-# Future integrations will follow same pattern
+# PR Reviews Received Sync
+rm ~/.github_todoist_pr_reviews_state.json
+
+# Generic pattern for future integrations
 rm ~/.github_todoist_<feature>_state.json
 ```
 
@@ -152,7 +226,8 @@ Each integration can run independently on its own schedule.
 
 **Cron** (recommended interval: */15 for most integrations):
 ```cron
-*/15 * * * * cd /path/to/repo && ruby github_todoist_sync.rb >> ~/pr_review_sync.log 2>&1
+*/15 * * * * cd /path/to/repo && ruby github_todoist_sync.rb >> ~/github_todoist_sync.log 2>&1
+*/15 * * * * cd /path/to/repo && ruby github_todoist_pr_reviews.rb >> ~/github_todoist_pr_reviews.log 2>&1
 # Add more lines for additional integrations with appropriate intervals
 ```
 
