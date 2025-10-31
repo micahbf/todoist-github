@@ -135,8 +135,8 @@ To run the syncs automatically every 15 minutes:
 
 2. Add these lines (adjust the path to your script location):
    ```cron
-   */15 * * * * cd /Users/micahbf/code/github-todoist && ruby github_todoist_sync.rb >> ~/github_todoist_sync.log 2>&1
-   */15 * * * * cd /Users/micahbf/code/github-todoist && ruby github_todoist_pr_reviews.rb >> ~/github_todoist_pr_reviews.log 2>&1
+   */15 * * * * cd /Users/micahbf/code/github-todoist && ruby github_todoist_sync.rb >> ${XDG_CONFIG_HOME:-$HOME/.config}/github-todoist/github_todoist_sync.log 2>&1
+   */15 * * * * cd /Users/micahbf/code/github-todoist && ruby github_todoist_pr_reviews.rb >> ${XDG_CONFIG_HOME:-$HOME/.config}/github-todoist/github_todoist_pr_reviews.log 2>&1
    ```
 
    Note: The scripts automatically read the `.env` file, so no need to export variables in cron.
@@ -146,7 +146,7 @@ To run the syncs automatically every 15 minutes:
 This will:
 - Run every 15 minutes
 - Load environment variables from `.env`
-- Log output to separate log files
+- Log output to `$XDG_CONFIG_HOME/github-todoist/` (or `~/.config/github-todoist/` if XDG_CONFIG_HOME is not set)
 
 ### Using Launchd (macOS alternative to cron)
 
@@ -173,9 +173,9 @@ For PR Review Requests (`~/Library/LaunchAgents/com.github.todoist.sync.plist`):
     <key>RunAtLoad</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>/tmp/github_todoist_sync.log</string>
+    <string>~/.config/github-todoist/github_todoist_sync.log</string>
     <key>StandardErrorPath</key>
-    <string>/tmp/github_todoist_sync.error.log</string>
+    <string>~/.config/github-todoist/github_todoist_sync.error.log</string>
 </dict>
 </plist>
 ```
@@ -201,9 +201,9 @@ For PR Reviews Received (`~/Library/LaunchAgents/com.github.todoist.pr_reviews.p
     <key>RunAtLoad</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>/tmp/github_todoist_pr_reviews.log</string>
+    <string>~/.config/github-todoist/github_todoist_pr_reviews.log</string>
     <key>StandardErrorPath</key>
-    <string>/tmp/github_todoist_pr_reviews.error.log</string>
+    <string>~/.config/github-todoist/github_todoist_pr_reviews.error.log</string>
 </dict>
 </plist>
 ```
@@ -306,13 +306,19 @@ Your Todoist token is invalid. Get a new one from the Todoist integrations page.
 2. Run the script with verbose output to see what's happening
 3. Check the log file if running via cron
 
-### State file location
+### State file and log locations
 
-State files are stored in your home directory:
-- `~/.github_todoist_sync_state.json` - PR review requests tracking
-- `~/.github_todoist_pr_reviews_state.json` - PR reviews received tracking
+All artifacts (state files and logs) are stored in `$XDG_CONFIG_HOME/github-todoist/` (or `~/.config/github-todoist/` if XDG_CONFIG_HOME is not set):
 
-You can delete these files to reset the state, but existing tasks won't be automatically cleaned up.
+**State files:**
+- `github_todoist_sync_state.json` - PR review requests tracking
+- `github_todoist_pr_reviews_state.json` - PR reviews received tracking
+
+**Log files (when using cron or launchd):**
+- `github_todoist_sync.log` - Output from PR review requests sync
+- `github_todoist_pr_reviews.log` - Output from PR reviews received sync
+
+You can delete the state files to reset the state, but existing tasks won't be automatically cleaned up.
 
 ## Security Notes
 

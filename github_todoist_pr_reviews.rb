@@ -13,7 +13,13 @@ require 'set'
 class GithubTodoistPrReviews
   GITHUB_API_BASE = 'https://api.github.com'
   TODOIST_API_BASE = 'https://api.todoist.com/rest/v2'
-  STATE_FILE = File.expand_path('~/.github_todoist_pr_reviews_state.json')
+
+  def self.config_dir
+    xdg_config = ENV['XDG_CONFIG_HOME'] || File.expand_path('~/.config')
+    File.join(xdg_config, 'github-todoist')
+  end
+
+  STATE_FILE = File.join(config_dir, 'github_todoist_pr_reviews_state.json')
 
   def initialize(github_token:, todoist_token:, todoist_project_id: nil, todoist_section_id: nil)
     @github_token = github_token
@@ -280,6 +286,8 @@ class GithubTodoistPrReviews
   end
 
   def save_state
+    # Ensure config directory exists
+    FileUtils.mkdir_p(self.class.config_dir)
     File.write(STATE_FILE, JSON.pretty_generate(@state))
   rescue StandardError => e
     puts "Error saving state file: #{e.message}"

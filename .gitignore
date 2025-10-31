@@ -1,2 +1,5 @@
 .env
+
+# Old state files (deprecated, kept for backwards compatibility)
 .github_todoist_sync_state.json
+.github_todoist_pr_reviews_state.json
