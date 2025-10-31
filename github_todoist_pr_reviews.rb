@@ -182,23 +182,20 @@ class GithubTodoistPrReviews
     # Map review state to readable format
     review_type = case review_state
                   when 'APPROVED'
-                    'Approval'
-                  when 'CHANGES_REQUESTED'
-                    'Changes Requested'
-                  when 'COMMENTED'
-                    'Comments'
+                    'approval'
                   else
-                    review_state
+                    'review'
                   end
 
-    task_content = "Follow up on #{review_type} from @#{reviewer} - PR ##{pr_number}"
+    task_content = "Follow up on #{review_type} of PR ##{pr_number}"
     task_description = "#{pr_url}\nPR: #{pr_title}\nRepository: #{repo_name}\nReview Type: #{review_type}\nReviewer: @#{reviewer}"
 
     uri = URI("#{TODOIST_API_BASE}/tasks")
     body = {
       content: task_content,
       description: task_description,
-      priority: review_state == 'CHANGES_REQUESTED' ? 3 : 2
+      priority: 4,
+      due_date: Date.today.to_s # Set due date to today (YYYY-MM-DD format)
     }
     body[:project_id] = @todoist_project_id if @todoist_project_id
     body[:section_id] = @todoist_section_id if @todoist_section_id
