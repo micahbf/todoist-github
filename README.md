@@ -2,33 +2,35 @@
 
 A collection of Ruby scripts that automatically sync GitHub activities to Todoist tasks. No external gem dependencies - uses only Ruby stdlib.
 
-## Integrations
+## Features
 
-### 1. PR Review Requests Sync (`github_todoist_sync.rb`)
-Syncs GitHub pull request review requests to Todoist tasks. When you're requested to review a PR, a task is created in Todoist. When you complete the review (or the request is removed), the task is automatically marked as complete.
+**`github_todoist_combined.rb`** - Syncs both PR review requests and PR reviews in a single execution with optimizations to avoid rate limiting.
 
-**Features:**
+### PR Review Requests
 - Automatically creates Todoist tasks for PRs requesting your review
 - Includes PR title, repository, author, and URL in the task
 - Sets tasks with configurable priority
 - Automatically completes tasks when you finish the review
 - Maintains state between runs to track which PRs have tasks
-- Safe to run repeatedly (idempotent)
 
-### 2. PR Reviews Received Sync (`github_todoist_pr_reviews.rb`)
-Monitors your own PRs for new reviews and creates follow-up tasks. When someone reviews your PR, a task is created with details about the latest review.
-
-**Features:**
+### PR Reviews Received
 - Tracks reviews on all your open PRs
 - Creates **one task per PR** showing the most recent review
 - Updates the task when a new review comes in (completes old, creates new)
 - Includes review type (Approval, Changes Requested, or Comments) in task
-- Sets higher priority for "Changes Requested" reviews
 - Links directly to the PR for quick access
 - **Automatically completes tasks when:**
   - The PR is merged
   - You request a new review (indicating you've addressed the feedback)
   - The PR is closed
+
+### Performance & Reliability
+- ✅ **Prevents rate limiting**: Throttles API requests and avoids concurrent bursts
+- ✅ **More efficient**: Shares PR detail fetching between both syncs
+- ✅ **Better monitoring**: Logs API usage and rate limit status
+- ✅ **Configurable throttling**: Default 0.5s between API calls (adjustable)
+- ✅ **Rate limit warnings**: Alerts when approaching limits
+- ✅ **Safe to run repeatedly**: Idempotent operations
 
 ## Prerequisites
 
@@ -99,60 +101,54 @@ Edit `.env` and add your tokens:
 ```bash
 GITHUB_TOKEN=ghp_your_token_here
 TODOIST_TOKEN=your_todoist_token_here
-TODOIST_PROJECT_ID=2331236912  # Optional
-TODOIST_SECTION_ID=123456789   # Optional (requires project ID)
+TODOIST_PROJECT_ID=2331236912     # Optional
+TODOIST_SECTION_ID=123456789      # Optional (requires project ID)
+THROTTLE_DELAY_SECONDS=0.5        # Optional (for combined script, default 0.5)
 ```
 
 ## Usage
 
 ### Manual Run
 
-The scripts automatically load environment variables from the `.env` file:
+The script automatically loads environment variables from the `.env` file:
 
 ```bash
-# PR Review Requests Sync
-ruby github_todoist_sync.rb
-
-# PR Reviews Received Sync
-ruby github_todoist_pr_reviews.rb
+ruby github_todoist_combined.rb
 ```
 
 Or pass environment variables directly if preferred:
 
 ```bash
-GITHUB_TOKEN=your_token TODOIST_TOKEN=your_token ruby github_todoist_sync.rb
-GITHUB_TOKEN=your_token TODOIST_TOKEN=your_token ruby github_todoist_pr_reviews.rb
+GITHUB_TOKEN=your_token TODOIST_TOKEN=your_token ruby github_todoist_combined.rb
 ```
 
 ### Automated Sync with Cron
 
-To run the syncs automatically every 15 minutes:
+To run the sync every 10-15 minutes:
 
 1. Open your crontab:
    ```bash
    crontab -e
    ```
 
-2. Add these lines (adjust the path to your script location):
+2. Add this line (adjust the path to your script location):
    ```cron
-   */15 * * * * cd /Users/micahbf/code/github-todoist && ruby github_todoist_sync.rb >> ${XDG_CONFIG_HOME:-$HOME/.config}/github-todoist/github_todoist_sync.log 2>&1
-   */15 * * * * cd /Users/micahbf/code/github-todoist && ruby github_todoist_pr_reviews.rb >> ${XDG_CONFIG_HOME:-$HOME/.config}/github-todoist/github_todoist_pr_reviews.log 2>&1
+   */10 * * * * cd /Users/micahbf/code/github-todoist && ruby github_todoist_combined.rb >> ${XDG_CONFIG_HOME:-$HOME/.config}/github-todoist/github_todoist.log 2>&1
    ```
 
-   Note: The scripts automatically read the `.env` file, so no need to export variables in cron.
+   Note: The script automatically reads the `.env` file, so no need to export variables in cron.
 
 3. Save and exit
 
 This will:
-- Run every 15 minutes
+- Run every 10 minutes (adjust to */15 if preferred)
 - Load environment variables from `.env`
+- Throttle API requests to avoid rate limiting
 - Log output to `$XDG_CONFIG_HOME/github-todoist/` (or `~/.config/github-todoist/` if XDG_CONFIG_HOME is not set)
 
 ### Using Launchd (macOS alternative to cron)
 
-Create separate plist files for each integration.
-
-For PR Review Requests (`~/Library/LaunchAgents/com.github.todoist.sync.plist`):
+Create `~/Library/LaunchAgents/com.github.todoist.combined.plist`:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -160,61 +156,32 @@ For PR Review Requests (`~/Library/LaunchAgents/com.github.todoist.sync.plist`):
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.github.todoist.sync</string>
+    <string>com.github.todoist.combined</string>
     <key>ProgramArguments</key>
     <array>
         <string>/usr/bin/ruby</string>
-        <string>/Users/micahbf/code/github-todoist/github_todoist_sync.rb</string>
+        <string>/Users/micahbf/code/github-todoist/github_todoist_combined.rb</string>
     </array>
     <key>WorkingDirectory</key>
     <string>/Users/micahbf/code/github-todoist</string>
     <key>StartInterval</key>
-    <integer>900</integer>
+    <integer>600</integer>
     <key>RunAtLoad</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>~/.config/github-todoist/github_todoist_sync.log</string>
+    <string>~/.config/github-todoist/github_todoist_combined.log</string>
     <key>StandardErrorPath</key>
-    <string>~/.config/github-todoist/github_todoist_sync.error.log</string>
+    <string>~/.config/github-todoist/github_todoist_combined.error.log</string>
 </dict>
 </plist>
 ```
 
-For PR Reviews Received (`~/Library/LaunchAgents/com.github.todoist.pr_reviews.plist`):
+Note: The script will automatically read the `.env` file from the WorkingDirectory, so you don't need to specify environment variables in the plist.
 
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.github.todoist.pr_reviews</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/usr/bin/ruby</string>
-        <string>/Users/micahbf/code/github-todoist/github_todoist_pr_reviews.rb</string>
-    </array>
-    <key>WorkingDirectory</key>
-    <string>/Users/micahbf/code/github-todoist</string>
-    <key>StartInterval</key>
-    <integer>900</integer>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>StandardOutPath</key>
-    <string>~/.config/github-todoist/github_todoist_pr_reviews.log</string>
-    <key>StandardErrorPath</key>
-    <string>~/.config/github-todoist/github_todoist_pr_reviews.error.log</string>
-</dict>
-</plist>
-```
-
-Note: The scripts will automatically read the `.env` file from the WorkingDirectory, so you don't need to specify environment variables in the plist.
-
-Then load them:
+Then load it:
 
 ```bash
-launchctl load ~/Library/LaunchAgents/com.github.todoist.sync.plist
-launchctl load ~/Library/LaunchAgents/com.github.todoist.pr_reviews.plist
+launchctl load ~/Library/LaunchAgents/com.github.todoist.combined.plist
 ```
 
 ## How It Works
@@ -306,6 +273,15 @@ Your Todoist token is invalid. Get a new one from the Todoist integrations page.
 2. Run the script with verbose output to see what's happening
 3. Check the log file if running via cron
 
+### Rate limit errors (HTTP 429)
+
+If you're experiencing rate limit errors:
+
+1. **Switch to the combined script** (`github_todoist_combined.rb`) - it includes throttling to avoid rate limits
+2. **Increase throttle delay** - Set `THROTTLE_DELAY_SECONDS=1.0` (or higher) in your `.env` file
+3. **Reduce sync frequency** - Change cron from */10 to */15 or */20
+4. **Check rate limit status** - The combined script logs your remaining API quota when it's below 50%
+
 ### State file and log locations
 
 All artifacts (state files and logs) are stored in `$XDG_CONFIG_HOME/github-todoist/` (or `~/.config/github-todoist/` if XDG_CONFIG_HOME is not set):
@@ -376,19 +352,25 @@ To use these IDs, add them to your .env file:
 
 ## Customization
 
-### PR Review Requests Sync (`github_todoist_sync.rb`)
+Edit `github_todoist_combined.rb` to customize:
 
-- Change task priority (line 156): `priority: 1` (1=normal, 2=medium, 3=high, 4=urgent)
-- Customize task content format (lines 149-150)
-- Add labels to tasks by modifying the `body` hash in `create_todoist_task`
-- Filter PRs by repository or other criteria in `fetch_github_review_requests_search_only`
+### PR Review Requests
 
-### PR Reviews Received Sync (`github_todoist_pr_reviews.rb`)
+- **Task priority** (line 408): `priority: 4` (1=normal, 2=medium, 3=high, 4=urgent)
+- **Task format** (lines 155-156): Customize task content and description
+- **Filtering**: Modify search query in `fetch_github_review_requests_search_only` to filter by repo/org
+- **Labels**: Add `labels: ['label-name']` to task body hash in `create_todoist_task`
 
-- Change task priority (line 206): `priority: review_state == 'CHANGES_REQUESTED' ? 3 : 2`
-- Customize task content format (line 190)
-- Add labels to tasks by modifying the `body` hash in `create_or_update_review_task`
-- Filter which review types trigger tasks by modifying the review processing logic
+### PR Reviews Received
+
+- **Task priority** (line 408): `priority: 4` (can make dynamic based on review type)
+- **Task format** (lines 283-284): Customize task content and description
+- **Filtering**: Modify review type handling in `create_review_task` to filter which reviews trigger tasks
+- **Labels**: Add `labels: ['label-name']` to task body hash in `create_todoist_task`
+
+### Rate Limiting
+
+- **Throttle delay**: Set `THROTTLE_DELAY_SECONDS` in `.env` (default 0.5s, increase if experiencing rate limits)
 
 ## License
 

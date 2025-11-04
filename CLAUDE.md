@@ -7,8 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 A collection of Ruby-based GitHub-Todoist integrations. Each integration is a standalone script with no external gem dependencies (uses only Ruby stdlib). All integrations share common patterns and utilities.
 
 **Current Integrations:**
-- `github_todoist_sync.rb` - Syncs PR review requests to Todoist tasks (auto-completes when review is done)
-- `github_todoist_pr_reviews.rb` - Monitors your PRs for new reviews and creates follow-up tasks with review type (auto-completes when PR is merged or review is re-requested)
+- `github_todoist_combined.rb` - Combined script that runs both PR review requests sync and PR reviews sync in a single execution with shared API calls, request throttling, and rate limit monitoring
 
 **Shared Utilities:**
 - `list_todoist_info.rb` - Discovers Todoist project/section IDs for configuration
@@ -18,11 +17,8 @@ A collection of Ruby-based GitHub-Todoist integrations. Each integration is a st
 All scripts automatically read `.env` file - no manual export needed.
 
 ```bash
-# PR Review Requests Sync
-ruby github_todoist_sync.rb
-
-# PR Reviews Received Sync
-ruby github_todoist_pr_reviews.rb
+# Main sync script (runs both PR review requests and PR reviews)
+ruby github_todoist_combined.rb
 
 # Utility: List Todoist projects and sections
 ruby list_todoist_info.rb
@@ -39,8 +35,23 @@ All scripts automatically load `.env` file via shared `load_env_file()` function
 - `TODOIST_TOKEN` - Todoist API token
 - `TODOIST_PROJECT_ID` - Target project (optional, defaults to Inbox)
 - `TODOIST_SECTION_ID` - Target section within project (optional, requires project ID)
+- `THROTTLE_DELAY_SECONDS` - Delay between API requests (optional, default 0.5s, combined script only)
 
 Use `.env.example` as template. When adding new integrations, add integration-specific variables to `.env.example` with comments.
+
+### Rate Limiting and Throttling
+
+GitHub has two types of rate limits:
+1. **Primary rate limit:** 5,000 requests/hour (generous, rarely hit)
+2. **Secondary rate limit:** Triggered by burst patterns of rapid concurrent requests
+
+The combined script addresses secondary rate limits through:
+- **Request throttling:** Configurable delay between API requests (default 0.5s)
+- **Shared PR details caching:** Eliminates duplicate fetches for the same PR
+- **Sequential execution:** Prevents concurrent API bursts from multiple scripts
+- **Rate limit monitoring:** Logs remaining quota and warns when approaching limits
+
+If you experience rate limit errors (HTTP 429), increase `THROTTLE_DELAY_SECONDS` to 1.0 or higher.
 
 ## Shared Patterns
 
@@ -133,64 +144,45 @@ When creating a new GitHub-Todoist integration:
 6. **Add to README:** Document the new integration with usage examples
 7. **Update .env.example:** Add any integration-specific variables
 
-## Integration-Specific Customization
+## Customization
 
-### PR Review Requests Sync (`github_todoist_sync.rb`)
+All customizations are done in `github_todoist_combined.rb`:
 
-**Task Priority** (line 156):
+### PR Review Requests
+
+**Task Priority** (line 408):
 ```ruby
-priority: 1  # 1=normal, 2=medium, 3=high, 4=urgent
+priority: 4,  # 1=normal, 2=medium, 3=high, 4=urgent
 ```
 
-**Task Format** (lines 149-150):
+**Task Format** (lines 155-156 in `create_todoist_task_for_review_request`):
 ```ruby
 task_content = "Review PR ##{pr_number}: #{pr_title}"
-task_description = "Repository: #{repo_name}\nAuthor: @#{author}\nURL: #{pr_url}"
+task_description = "#{pr_url}\nRepository: #{repo_name}\nAuthor: @#{author}"
 ```
 
 **Filtering:** Modify search query in `fetch_github_review_requests_search_only` to filter by repo/org
 
-**Labels:** Add `labels: ['label-name']` to task body hash in `create_todoist_task`
+### PR Reviews Received
 
-### PR Reviews Received Sync (`github_todoist_pr_reviews.rb`)
-
-**Task Priority** (line 206):
+**Task Priority** (line 408):
 ```ruby
-priority: review_state == 'CHANGES_REQUESTED' ? 3 : 2  # Dynamic based on review type
+priority: 4,  # Can make dynamic: review_state == 'CHANGES_REQUESTED' ? 3 : 2
 ```
 
-**Task Format** (line 190):
+**Task Format** (lines 283-284 in `create_review_task`):
 ```ruby
-task_content = "Follow up on #{review_type} from @#{reviewer} - PR ##{pr_number}"
+task_content = "Follow up on #{review_type} of PR ##{pr_number}"
+task_description = "#{pr_url}\nPR: #{pr_title}\nRepository: #{repo_name}\nReview Type: #{review_type}\nReviewer: @#{reviewer}"
 ```
 
-**One Task Per PR** (lines 114-125):
-```ruby
-# Get the most recent review (reviews are returned chronologically)
-latest_review = reviews.last
+**Filtering:** Modify review type handling in `create_review_task` to filter which reviews trigger tasks
 
-# Check if this is a new review or if we don't have a task yet
-if @state['pr_reviews'][pr_url]['last_review_id'] != latest_review['id']
-  # Create or update task for this PR (completes old task if exists)
-  task_id = create_or_update_review_task(pr, latest_review)
-end
-```
+### General
 
-**Completion Triggers** (lines 90-103):
-```ruby
-# Modify conditions for automatic task completion
-if pr_details['merged']
-  complete_task_for_pr(pr_url, "PR was merged")
-end
+**Labels:** Add `labels: ['label-name']` to task body hash in `create_todoist_task` method
 
-if !requested_reviewers.empty? || !requested_teams.empty?
-  complete_task_for_pr(pr_url, "New review was requested")
-end
-```
-
-**Filtering:** Modify review type handling in `create_or_update_review_task` to filter which reviews trigger tasks
-
-**Labels:** Add `labels: ['label-name']` to task body hash in `create_or_update_review_task`
+**Throttle Delay:** Adjust `THROTTLE_DELAY_SECONDS` in `.env` (default 0.5s, increase if experiencing rate limits)
 
 ## State File Management
 
@@ -222,16 +214,34 @@ Note: Resetting state won't clean up existing Todoist tasks, only the tracking m
 
 ## Deployment
 
-Each integration can run independently on its own schedule.
-
-**Cron** (recommended interval: */15 for most integrations):
+**Cron** (recommended interval: */10 to */15):
 ```cron
-*/15 * * * * cd /path/to/repo && ruby github_todoist_sync.rb >> ~/github_todoist_sync.log 2>&1
-*/15 * * * * cd /path/to/repo && ruby github_todoist_pr_reviews.rb >> ~/github_todoist_pr_reviews.log 2>&1
-# Add more lines for additional integrations with appropriate intervals
+*/10 * * * * cd /path/to/repo && ruby github_todoist_combined.rb >> ~/github_todoist.log 2>&1
 ```
 
 **Launchd** (macOS):
-Set `WorkingDirectory` to repo path so `.env` loads correctly. Create separate plist files for each integration with appropriate `StartInterval`. See README for full plist example.
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.user.github-todoist-combined</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/ruby</string>
+    <string>github_todoist_combined.rb</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/path/to/repo</string>
+  <key>StartInterval</key>
+  <integer>600</integer>
+  <key>StandardOutPath</key>
+  <string>/tmp/github-todoist-combined.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/github-todoist-combined.err</string>
+</dict>
+</plist>
+```
 
-**Key requirement:** Scripts must run from repo directory (or have `WORKING_DIRECTORY` set) to find `.env` file via relative path resolution in `load_env_file()`.
+**Key requirement:** Script must run from repo directory (or have `WORKING_DIRECTORY` set) to find `.env` file via relative path resolution in `load_env_file()`.
