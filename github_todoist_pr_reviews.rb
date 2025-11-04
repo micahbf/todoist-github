@@ -35,6 +35,13 @@ class GithubTodoistPrReviews
 
     # Fetch all open PRs authored by me
     my_open_prs = fetch_my_open_prs
+
+    # If nil is returned, there was an API error - abort sync to avoid false completions
+    if my_open_prs.nil?
+      puts "Aborting sync due to API error"
+      return
+    end
+
     puts "Found #{my_open_prs.length} open PR(s) authored by you"
 
     # Track which PRs are still open
@@ -73,13 +80,15 @@ class GithubTodoistPrReviews
       data = JSON.parse(response.body)
       data['items'] || []
     else
+      # Return nil on error to signal API failure (vs legitimately 0 results)
+      # This prevents false completions when rate limited or other errors occur
       puts "Error fetching GitHub PRs: #{response.code} #{response.message}"
       puts response.body if response.body
-      []
+      nil
     end
   rescue StandardError => e
     puts "Error fetching GitHub PRs: #{e.message}"
-    []
+    nil
   end
 
   def process_pr(pr)

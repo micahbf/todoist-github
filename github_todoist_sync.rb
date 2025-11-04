@@ -34,6 +34,13 @@ class GithubTodoistSync
 
     # Fetch PRs requesting review (search API only, no filtering yet)
     all_review_requests = fetch_github_review_requests_search_only
+
+    # If nil is returned, there was an API error - abort sync to avoid false completions
+    if all_review_requests.nil?
+      puts "Aborting sync due to API error"
+      return
+    end
+
     puts "Found #{all_review_requests.length} PR(s) requesting review (may include team requests)"
 
     # Only fetch PR details for PRs not yet in our state
@@ -89,13 +96,15 @@ class GithubTodoistSync
       data = JSON.parse(response.body)
       data['items'] || []
     else
+      # Return nil on error to signal API failure (vs legitimately 0 results)
+      # This prevents false completions when rate limited or other errors occur
       puts "Error fetching GitHub PRs: #{response.code} #{response.message}"
       puts response.body if response.body
-      []
+      nil
     end
   rescue StandardError => e
     puts "Error fetching GitHub PRs: #{e.message}"
-    []
+    nil
   end
 
   def directly_requested_reviewer?(pr)
