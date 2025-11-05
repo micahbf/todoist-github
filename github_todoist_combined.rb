@@ -7,6 +7,7 @@ require 'uri'
 require 'fileutils'
 require 'date'
 require 'set'
+require 'time'
 
 # Combined GitHub-Todoist Sync
 # Syncs both PR review requests AND PR reviews in a single execution
@@ -394,13 +395,43 @@ class GithubTodoistCombined
     nil
   end
 
+  def calculate_due_date
+    # Get current time in Central Time (America/Chicago)
+    # This properly handles DST transitions
+    # Use TZ environment variable approach for proper DST handling
+    original_tz = ENV['TZ']
+    ENV['TZ'] = 'America/Chicago'
+    central_time = Time.now
+    ENV['TZ'] = original_tz
+
+    current_date = Date.parse(central_time.to_s)
+    current_hour = central_time.hour
+    day_of_week = current_date.wday # 0 = Sunday, 6 = Saturday
+
+    # Check if it's after 5pm Central (17:00) or on a weekend
+    if current_hour >= 17 || day_of_week == 0 || day_of_week == 6
+      # Find the next business day
+      next_day = current_date + 1
+
+      # Keep advancing until we find a weekday
+      while next_day.wday == 0 || next_day.wday == 6
+        next_day += 1
+      end
+
+      next_day
+    else
+      # It's before 5pm on a weekday, use today
+      current_date
+    end
+  end
+
   def create_todoist_task(task_content, task_description)
     uri = URI("#{TODOIST_API_BASE}/tasks")
     body = {
       content: task_content,
       description: task_description,
       priority: 4,
-      due_date: Date.today.to_s # Set due date to today (YYYY-MM-DD format)
+      due_date: calculate_due_date.to_s # Set due date based on time of day and weekends (YYYY-MM-DD format)
     }
     body[:project_id] = @todoist_project_id if @todoist_project_id
     body[:section_id] = @todoist_section_id if @todoist_section_id
