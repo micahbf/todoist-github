@@ -360,8 +360,8 @@ class GithubTodoistCombined
                     'review'
                   end
 
-    task_content = "Follow up on #{review_type} of PR ##{pr_number}"
-    task_description = "#{pr_url}\nPR: #{pr_title}\nRepository: #{repo_name}\nReview Type: #{review_type}\nReviewer: @#{reviewer}"
+    task_content = "Follow up PR ##{pr_number}: #{pr_title}"
+    task_description = "#{pr_url}\nRepository: #{repo_name}\nReview Type: #{review_type}\nReviewer: @#{reviewer}"
 
     create_todoist_task(task_content, task_description)
   end
@@ -430,7 +430,7 @@ class GithubTodoistCombined
     body = {
       content: task_content,
       description: task_description,
-      priority: 4,
+      priority: 0,
       due_date: calculate_due_date.to_s # Set due date based on time of day and weekends (YYYY-MM-DD format)
     }
     body[:project_id] = @todoist_project_id if @todoist_project_id
